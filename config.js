@@ -11,7 +11,34 @@ export const RUNPOD_CONFIG = {
 //     endpoint: process.env.RUNPOD_ENDPOINT
 // }; 
 
-// 不使用export，讓變數可全域訪問
+// 設置默認API配置，適用於生產環境
+// 注意：此文件將被提交到GitHub，不要包含真實的API金鑰
 const API_CONFIG = {
-    baseUrl: window.API_BASE_URL || 'http://localhost:7860'
-}; 
+    // 生產環境使用RunPod的端點
+    baseUrl: 'https://api.runpod.ai/v2/2xi4wl5mf51083',
+    
+    // 生產環境使用安全的方式獲取API金鑰
+    get apiKey() {
+        // 嘗試從localStorage獲取臨時金鑰（僅用於演示）
+        // 在實際應用中，應考慮更安全的方式
+        return localStorage.getItem('temp_api_key') || '';
+    }
+};
+
+// 檢測是否在本地開發環境，並嘗試加載本地配置
+(function loadLocalConfig() {
+    // 檢查是否在本地開發環境（localhost或127.0.0.1）
+    const isLocalhost = window.location.hostname === 'localhost' || 
+                      window.location.hostname === '127.0.0.1';
+    
+    if (isLocalhost) {
+        // 嘗試動態加載本地配置（僅用於開發環境）
+        const script = document.createElement('script');
+        script.src = 'config.local.js';
+        script.onerror = () => console.warn('未找到本地配置，使用默認配置');
+        document.head.appendChild(script);
+    }
+})();
+
+// 將配置導出用於其他模塊
+export { API_CONFIG }; 

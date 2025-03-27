@@ -36,14 +36,24 @@ let hasTimestamps = false;
 // 初始化
 (async function init() {
     try {
-        // 檢查 API 是否可用
-        const response = await fetch(`${API_CONFIG.baseUrl}/`);
+        // 準備請求頭
+        const headers = {};
+        if (API_CONFIG.apiKey) {
+            headers['Authorization'] = `Bearer ${API_CONFIG.apiKey}`;
+        }
+        
+        // 檢查API是否可用
+        const response = await fetch(`${API_CONFIG.baseUrl}/`, {
+            headers: headers
+        });
+        
         if (!response.ok) {
-            showNotification('無法連接到 API 服務', 'error');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `API服務錯誤: ${response.status}`);
         }
     } catch (error) {
-        console.error('API 連接錯誤:', error);
-        showNotification('API 服務暫時不可用，請稍後再試', 'error');
+        console.error('API連接錯誤:', error);
+        showNotification('API服務暫時不可用，請稍後再試', 'error');
     }
 })();
 
@@ -120,9 +130,10 @@ async function getAudioData() {
     throw new Error('請提供影片連結或上傳音頻文件');
 }
 
-// 修改 transcribeAudio 函數以處理不同類型的輸入
+// 修改 transcribeAudio 函數以添加API金鑰
 async function transcribeAudio(audioData, modelType) {
     try {
+        // 準備請求體
         const requestBody = {
             input: {
                 model: modelType,
@@ -139,20 +150,32 @@ async function transcribeAudio(audioData, modelType) {
             requestBody.input.filename = audioData.filename;
         }
 
+        // 設置請求頭，包含授權信息
+        const headers = { 
+            'Content-Type': 'application/json' 
+        };
+        
+        // 如果配置中有API金鑰，添加到請求頭
+        if (API_CONFIG.apiKey) {
+            headers['Authorization'] = `Bearer ${API_CONFIG.apiKey}`;
+        }
+
+        // 發送請求
         const response = await fetch(`${API_CONFIG.baseUrl}/transcribe`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP錯誤！狀態: ${response.status}`);
         }
 
         const { id: taskId } = await response.json();
         return await pollResult(taskId);
     } catch (error) {
-        console.error('Transcription error:', error);
+        console.error('轉錄錯誤:', error);
         throw error;
     }
 }
@@ -270,33 +293,39 @@ async function transcribeYouTubeLink() {
     // ... 確保不使用API金鑰 ...
 }
 
-// 輪詢RunPod結果
-async function pollRunpodResult(jobId) {
+// 修改輪詢函數，添加授權頭
+async function pollResult(jobId) {
     try {
-        const response = await fetch(`${API_CONFIG.baseUrl}/status/${jobId}`);
+        // 準備請求頭
+        const headers = {};
+        if (API_CONFIG.apiKey) {
+            headers['Authorization'] = `Bearer ${API_CONFIG.apiKey}`;
+        }
+        
+        // 輪詢結果
+        const response = await fetch(`${API_CONFIG.baseUrl}/status/${jobId}`, {
+            headers: headers
+        });
+        
+        // 處理響應數據
         const data = await response.json();
         
         if (data.status === 'COMPLETED') {
             // 處理成功結果
-            const result = data.output;
-            displayTranscription(result.transcription);
-            displayPerformanceData(result.performance);
-            setLoading(false);
-            return result; // 返回結果
+            return {
+                text: data.output.transcription,
+                metrics: data.output.performance
+            };
         } else if (data.status === 'FAILED') {
             // 處理失敗
-            setLoading(false);
-            showMessage(`轉譯失敗: ${data.error || '未知錯誤'}`, 'error');
-            throw new Error(data.error || '轉譯失敗');
+            throw new Error(data.error || '轉錄失敗');
         } else {
             // 繼續輪詢
             await new Promise(resolve => setTimeout(resolve, 2000));
-            return pollRunpodResult(jobId); // 遞迴調用
+            return pollResult(jobId);
         }
     } catch (error) {
         console.error('輪詢結果錯誤:', error);
-        setLoading(false);
-        showMessage(`獲取結果失敗: ${error.message}`, 'error');
         throw error;
     }
 }

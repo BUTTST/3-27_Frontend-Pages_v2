@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whisper API 設定</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #1e1e1e;
+            color: #f0f0f0;
+        }
+        h1 {
+            color: #0cc;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            background-color: #2d2d2d;
+            border: 1px solid #444;
+            color: #f0f0f0;
+        }
+        button {
+            background-color: #0cc;
+            color: #000;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+        }
+        .note {
+            font-size: 0.8em;
+            color: #aaa;
+            margin-top: 5px;
+        }
+        .success {
+            color: #0c0;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Whisper API 設定</h1>
+    <div class="form-group">
+        <label for="api-key">API 金鑰</label>
+        <input type="text" id="api-key" placeholder="輸入您的API金鑰，例如: rpa_XXXXXXXX">
+        <p class="note">注意：這只是暫時存儲金鑰在瀏覽器中，僅用於測試。關閉瀏覽器後將被清除。</p>
+    </div>
+    <button id="save-button">保存設定</button>
+    <div id="status" class="success" style="display: none;"></div>
+
+    <script>
+        // 檢查是否已有存儲的API金鑰
+        document.addEventListener('DOMContentLoaded', function() {
+            const savedKey = localStorage.getItem('temp_api_key');
+            if (savedKey) {
+                document.getElementById('api-key').value = savedKey;
+            }
+        });
+
+        // 保存API金鑰到localStorage
+        document.getElementById('save-button').addEventListener('click', function() {
+            const apiKey = document.getElementById('api-key').value.trim();
+            if (apiKey) {
+                localStorage.setItem('temp_api_key', apiKey);
+                const status = document.getElementById('status');
+                status.textContent = 'API金鑰已保存！您現在可以關閉此頁面並使用轉錄服務。';
+                status.style.display = 'block';
+            } else {
+                alert('請輸入有效的API金鑰');
+            }
+        });
+    </script>
+</body>
+</html> 

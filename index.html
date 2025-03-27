@@ -14,6 +14,11 @@
             <p class="subtitle">支援 YouTube、YTshorts、TikTok 網址或上傳音訊檔案</p>
         </header>
 
+        <div id="api-key-notice" style="display: none; background-color: #f8d7da; color: #721c24; padding: 10px; margin-bottom: 20px; border-radius: 5px;">
+            未檢測到API金鑰。某些功能可能無法正常工作。
+            <a href="admin.html" target="_blank">點擊這裡設置API金鑰</a>
+        </div>
+
         <main>
             <div class="app-container">
                 <!-- 左側：輸入區域 -->
@@ -151,5 +156,14 @@
 
     <script src="config.js"></script>
     <script src="scripts.js"></script>
+    <script>
+        // 检查是否有API金钥
+        document.addEventListener('DOMContentLoaded', function() {
+            const hasApiKey = localStorage.getItem('temp_api_key');
+            if (!hasApiKey && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+                document.getElementById('api-key-notice').style.display = 'block';
+            }
+        });
+    </script>
 </body>
 </html> 
