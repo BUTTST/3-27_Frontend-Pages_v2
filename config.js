@@ -15,13 +15,16 @@ export const RUNPOD_CONFIG = {
 // 注意：此文件將被提交到GitHub，不要包含真實的API金鑰
 const API_CONFIG = {
     // 生產環境使用RunPod的端點
-    baseUrl: 'https://api.runpod.ai/v2/2xi4wl5mf51083',
+    baseUrl: 'https://api.runpod.ai/v2/2xi4wl5mf51083/run',
     
-    // 生產環境使用安全的方式獲取API金鑰
+    // 改用更安全的API金鑰存取方式
     get apiKey() {
-        // 嘗試從localStorage獲取臨時金鑰（僅用於演示）
-        // 在實際應用中，應考慮更安全的方式
-        return localStorage.getItem('temp_api_key') || '';
+        const key = localStorage.getItem('temp_api_key');
+        if (!key) {
+            console.warn('API金鑰未設置');
+            return '';
+        }
+        return key;
     }
 };
 

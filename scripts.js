@@ -133,49 +133,25 @@ async function getAudioData() {
 // 修改 transcribeAudio 函數以添加API金鑰
 async function transcribeAudio(audioData, modelType) {
     try {
-        // 準備請求體
-        const requestBody = {
-            input: {
-                model: modelType,
-                language: "auto",
-                timestamps: timestampCheckbox.checked
-            }
-        };
-
-        // 根據輸入類型設置請求內容
-        if (audioData.type === 'url') {
-            requestBody.input.link = audioData.content;
-        } else {
-            requestBody.input.audio = audioData.content;
-            requestBody.input.filename = audioData.filename;
-        }
-
-        // 設置請求頭，包含授權信息
-        const headers = { 
-            'Content-Type': 'application/json' 
-        };
-        
-        // 如果配置中有API金鑰，添加到請求頭
-        if (API_CONFIG.apiKey) {
-            headers['Authorization'] = `Bearer ${API_CONFIG.apiKey}`;
-        }
-
-        // 發送請求
-        const response = await fetch(`${API_CONFIG.baseUrl}/transcribe`, {
+        const response = await fetch(API_CONFIG.baseUrl, {
             method: 'POST',
-            headers: headers,
-            body: JSON.stringify(requestBody)
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_CONFIG.apiKey}`
+            },
+            body: JSON.stringify({
+                url: audioData,
+                model: modelType
+            })
         });
 
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `HTTP錯誤！狀態: ${response.status}`);
+            throw new Error(`API錯誤: ${response.status}`);
         }
 
-        const { id: taskId } = await response.json();
-        return await pollResult(taskId);
+        return await response.json();
     } catch (error) {
-        console.error('轉錄錯誤:', error);
+        console.error('轉譯請求失敗:', error);
         throw error;
     }
 }
