@@ -128,7 +128,7 @@ const TranscriptionController = {
             });
             
             // 4. 顯示結果
-            outputText.value = result.text;
+        outputText.value = result.text;
             this.updatePerformanceMetrics(result.metrics);
             
             // 保存當前轉譯結果
@@ -137,19 +137,19 @@ const TranscriptionController = {
             
             // 顯示成功通知
             this.showNotification('轉譯完成！', 'success');
-        } catch (error) {
+    } catch (error) {
             console.error('轉譯過程失敗:', error);
             outputText.value = this.formatErrorMessage(error);
             this.showNotification('轉譯失敗', 'error');
-        } finally {
-            loadingOverlay.style.display = 'none';
-        }
+    } finally {
+        loadingOverlay.style.display = 'none';
+    }
     },
     
     // 獲取輸入連結
     async getInputLink() {
         const linkInput = document.getElementById('link-input');
-        const link = linkInput.value.trim();
+    const link = linkInput.value.trim();
         
         if (!link) {
             throw new Error('請提供影片連結');
@@ -683,7 +683,7 @@ const ApiService = {
         }
     },
     
-    // 提交轉譯任務 - 嚴格遵循後端handler函數期望的格式
+    // 修正後的提交轉譯任務函數
     async submitTranscriptionJob(link, modelType, useTimestamps) {
         console.log('提交轉譯任務...');
         
@@ -692,12 +692,12 @@ const ApiService = {
             throw new Error('API金鑰未設置，請先設置API金鑰');
         }
         
-        // 構建請求數據 - 與後端handler函數參數完全匹配
+        // 構建請求數據 - 參數名稱與後端期望完全匹配
         const requestData = {
             input: {
-                link: link,               // 使用link參數
-                model: modelType,         // 模型名稱
-                timestamps: useTimestamps // 時間戳選項
+                link: link,               // 正確的參數名稱
+                model: modelType,         // 正確的參數名稱
+                timestamps: useTimestamps // 正確的參數名稱
             }
         };
         
