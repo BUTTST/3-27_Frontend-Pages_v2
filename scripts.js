@@ -118,8 +118,8 @@ async function transcribeAudio(audioData, modelType) {
         
         const requestData = {
             input: {
-                url: audioData,
-                model: modelType,
+                audio: audioData,
+                model_name: modelType,
                 timestamps: timestampCheckbox.checked
             }
         };
@@ -290,6 +290,10 @@ async function pollResult(jobId, retryCount = 0) {
     }
     
     try {
+        // 更詳細的日誌
+        console.log(`輪詢任務 #${retryCount+1}: ${jobId}`);
+        document.getElementById('output-text').value = `正在處理音訊，請稍候...\n\n任務ID: ${jobId}\n輪詢次數: ${retryCount+1}/30`;
+        
         // 修正URL格式 - 這是關鍵修改
         const statusUrl = `https://api.runpod.ai/v2/2xi4wl5mf51083/status/${jobId}`;
         
@@ -325,6 +329,9 @@ async function pollResult(jobId, retryCount = 0) {
             }
         } else if (data.status === 'FAILED') {
             throw new Error(data.error || '轉錄失敗');
+        } else if (data.status === 'IN_QUEUE' && retryCount > 10) {
+            console.warn(`任務長時間在隊列中(${retryCount}次輪詢)，嘗試重新提交...`);
+            // 選擇性重新提交或取消
         } else {
             // 增加等待時間和重試次數限制
             console.log(`任務狀態: ${data.status}，繼續等待...`);
