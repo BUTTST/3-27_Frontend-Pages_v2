@@ -692,12 +692,26 @@ const ApiService = {
             throw new Error('API金鑰未設置，請先設置API金鑰');
         }
         
-        // 構建請求數據 - 參數名稱與後端期望完全匹配
+        // 處理YouTube鏈接格式
+        let processedLink = link;
+        if (link.includes('youtube.com') || link.includes('youtu.be')) {
+            // 使用invidious等替代服務前綴（如果需要）
+            // processedLink = `https://yewtu.be/watch?v=${this.extractYouTubeID(link)}`;
+            
+            // 或者轉換為短鏈接格式（有時這種格式更容易處理）
+            const videoId = this.extractYouTubeID(link);
+            if (videoId) {
+                processedLink = `https://youtu.be/${videoId}`;
+                console.log('轉換為短鏈接格式:', processedLink);
+            }
+        }
+        
+        // 構建請求數據
         const requestData = {
             input: {
-                link: link,               // 正確的參數名稱
-                model: modelType,         // 正確的參數名稱
-                timestamps: useTimestamps // 正確的參數名稱
+                link: processedLink,
+                model: modelType,
+                timestamps: useTimestamps
             }
         };
         
@@ -761,6 +775,13 @@ const ApiService = {
             console.error(`檢查任務 ${jobId} 狀態失敗:`, error);
             throw error;
         }
+    },
+    
+    // 抽取YouTube視頻ID的輔助函數
+    extractYouTubeID(url) {
+        const regExp = /^.*((youtu.be\/)|(v\/)|(\/u\/\w\/)|(embed\/)|(watch\?))\??v?=?([^#&?]*).*/;
+        const match = url.match(regExp);
+        return (match && match[7].length === 11) ? match[7] : null;
     }
 };
 
@@ -811,6 +832,23 @@ const JobPoller = {
                 await new Promise(resolve => setTimeout(resolve, interval));
             } catch (error) {
                 console.error(`輪詢第 ${attempt} 次失敗:`, error);
+                
+                // 特別處理YouTube錯誤
+                if (error.message && (
+                    error.message.includes('YouTube') || 
+                    error.message.includes('HTTP Error 400') ||
+                    error.message.includes('Precondition check failed')
+                )) {
+                    throw new Error(`無法下載YouTube視頻。可能原因：
+1. 視頻可能被限制或需要登入
+2. 視頻可能在您的地區不可用
+3. YouTube可能檢測到自動下載
+
+建議嘗試：
+- 使用不同的視頻連結
+- 使用較短的YouTube短片
+- 如果您有本地音頻文件，嘗試直接上傳`);
+                }
                 
                 // 短暫等待後重試
                 await new Promise(resolve => setTimeout(resolve, 5000));
@@ -899,7 +937,7 @@ function initDebugTools() {
     });
     
     document.getElementById('test-sample-btn').addEventListener('click', () => {
-        document.getElementById('link-input').value = 'https://www.youtube.com/shorts/JdUjciCnS6g';
+        document.getElementById('link-input').value = 'https://www.youtube.com/watch?v=JdUjciCnS6g';
         document.getElementById('model-select').value = 'tiny';
         document.getElementById('transcribe-button').click();
     });
