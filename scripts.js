@@ -29,30 +29,6 @@ const uploadContainer = document.querySelector('.upload-container');
 let currentTranscription = '';
 let hasTimestamps = false;
 
-// 初始化
-(async function init() {
-    try {
-        // 準備請求頭
-        const headers = {};
-        if (API_CONFIG.apiKey) {
-            headers['Authorization'] = `Bearer ${API_CONFIG.apiKey}`;
-        }
-        
-        // 檢查API是否可用
-        const response = await fetch(`${API_CONFIG.baseUrl}/`, {
-            headers: headers
-        });
-        
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `API服務錯誤: ${response.status}`);
-        }
-    } catch (error) {
-        console.error('API連接錯誤:', error);
-        showNotification('API服務暫時不可用，請稍後再試', 'error');
-    }
-})();
-
 // 切換上傳區域顯示/隱藏
 uploadToggle.addEventListener('click', () => {
     uploadContainer.classList.toggle('hidden');
@@ -110,31 +86,18 @@ async function getAudioData() {
     // 檢查是否有 URL 輸入
     const link = linkInput.value.trim();
     if (link) {
-        return {
-            type: 'url',
-            content: link
-        };
+        // 直接返回URL字符串，而不是對象
+        return link;
     }
 
     // 檢查是否有文件輸入
     const file = fileInput.files[0];
     if (file) {
-        // 將文件轉換為 base64
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                resolve({
-                    type: 'file',
-                    content: e.target.result.split(',')[1], // 獲取 base64 內容
-                    filename: file.name
-                });
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-        });
+        // 暫時不支持文件上傳
+        throw new Error('目前僅支持網址轉譯，檔案上傳功能即將推出');
     }
 
-    throw new Error('請提供影片連結或上傳音頻文件');
+    throw new Error('請提供影片連結');
 }
 
 // 修改 transcribeAudio 函數以符合RunPod API格式要求
@@ -142,9 +105,12 @@ async function transcribeAudio(audioData, modelType) {
     try {
         // 檢查是否已設置API金鑰
         if (!API_CONFIG.apiKey) {
-            throw new Error('未設置API金鑰，請先前往admin.html頁面設置');
+            throw new Error('未設置API金鑰，請點擊頁面頂部的"設置API金鑰"按鈕');
         }
 
+        console.log('發送請求到:', API_CONFIG.baseUrl);
+        console.log('使用金鑰:', API_CONFIG.apiKey.substring(0, 8) + '...');
+        
         // 設置正確的請求格式
         const response = await fetch(API_CONFIG.baseUrl, {
             method: 'POST',
@@ -153,8 +119,8 @@ async function transcribeAudio(audioData, modelType) {
                 'Authorization': `Bearer ${API_CONFIG.apiKey}`
             },
             body: JSON.stringify({
-                input: {  // 確保有這個input包裹層
-                    url: audioData.content,
+                input: {
+                    url: audioData, // 直接使用URL字符串
                     model: modelType,
                     timestamps: timestampCheckbox.checked
                 }
@@ -162,12 +128,14 @@ async function transcribeAudio(audioData, modelType) {
         });
 
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `API錯誤: ${response.status}`);
+            const errorText = await response.text();
+            console.error('API回應錯誤:', errorText);
+            throw new Error(`API錯誤: ${response.status}`);
         }
 
         // 解析響應
         const data = await response.json();
+        console.log('收到回應:', data);
         
         // 處理異步任務
         if (data.id) {
@@ -348,15 +316,10 @@ function updatePerformanceMetrics(metrics) {
 
 // ... 其他現有代碼 ... 
 
-document.addEventListener('DOMContentLoaded', function() {
-    // 檢查API金鑰是否已設置
+// 簡化初始化過程，不進行API檢查
+(function init() {
+    console.log('應用初始化中...');
+    // 僅顯示API鑰匙狀態
     const apiKey = localStorage.getItem('temp_api_key');
-    const apiKeyNotice = document.getElementById('api-key-notice');
-    
-    if (!apiKey) {
-        console.warn('API金鑰未設置');
-        apiKeyNotice.style.display = 'block';
-    } else {
-        apiKeyNotice.style.display = 'none';
-    }
-}); 
+    console.log('API金鑰狀態:', apiKey ? '已設置' : '未設置');
+})(); 

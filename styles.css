@@ -462,11 +462,11 @@ footer {
 }
 
 .modal-content {
-    background-color: var(--card-background);
+    background-color: #1e1e1e;
     margin: 10% auto;
     padding: 25px;
     border-radius: 10px;
-    box-shadow: var(--shadow);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     max-width: 500px;
     position: relative;
 }
@@ -477,22 +477,16 @@ footer {
     right: 20px;
     font-size: 24px;
     font-weight: bold;
-    color: var(--light-text);
+    color: #aaa;
     cursor: pointer;
 }
 
 .close-button:hover {
-    color: var(--primary-color);
-}
-
-.note {
-    font-size: 0.8rem;
-    color: var(--light-text);
-    margin-top: 5px;
+    color: #0cc;
 }
 
 .success-message {
-    color: var(--success-color);
+    color: #0c0;
     margin-top: 15px;
     font-weight: 600;
 } 
