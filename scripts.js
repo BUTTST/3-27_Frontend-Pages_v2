@@ -79,8 +79,9 @@ transcribeButton.addEventListener('click', async () => {
         // 顯示成功通知
         showNotification('轉譯完成！', 'success');
     } catch (error) {
-        showNotification('轉錄失敗：' + error.message, 'error');
-        outputText.value = `處理過程中出錯：${error.message}\n\n請檢查網址是否有效，或稍後再試。`;
+        const errorMessage = handleApiError(error, '轉錄過程');
+        showNotification('轉錄失敗', 'error');
+        outputText.value = errorMessage;
     } finally {
         loadingOverlay.style.display = 'none';
     }
@@ -133,11 +134,10 @@ async function transcribeAudio(audioData, modelType) {
         
         const requestData = {
             input: {
-                source_url: audioData,
-                model: modelType,
+                audio: audioData,          // 嘗試使用'audio'而非'source_url'
+                model_type: modelType,     // 嘗試不同參數名稱
                 language: "auto",
-                task: "transcribe",
-                timestamps: timestampCheckbox.checked
+                return_timestamps: timestampCheckbox.checked  // 嘗試不同參數名稱
             }
         };
         
@@ -357,36 +357,57 @@ async function pollResult(jobId, retryCount = 0) {
         console.log("輪詢結果:", data);
         
         if (data.status === 'COMPLETED') {
-            console.log('轉譯任務完成，完整回應:', data);
+            console.log('轉譯任務完成，原始回應:', data);
+            console.log('輸出數據類型:', typeof data.output);
+            console.log('輸出數據結構:', JSON.stringify(data.output, null, 2));
             
-            // 更好的結果處理邏輯
-            let resultText = "無轉譯結果";
-            let metrics = { total_time: 0, word_count: 0 };
+            // 更安全的結果提取
+            let resultText = "處理完成，但無法找到轉錄文本";
+            let metrics = { processing_time: 0, characters: 0 };
             
-            // 處理各種可能的回應格式
-            if (data.output) {
-                if (typeof data.output === 'object') {
-                    if (data.output.transcription) {
-                        resultText = data.output.transcription;
-                    } else if (data.output.text) {
-                        resultText = data.output.text;
-                    } else if (data.output.result) {
-                        resultText = data.output.result;
+            try {
+                // 處理不同的回應格式可能性
+                if (data.output) {
+                    if (typeof data.output === 'string') {
+                        resultText = data.output;
+                    } else if (typeof data.output === 'object') {
+                        // 嘗試各種可能的屬性名稱
+                        if (data.output.text) {
+                            resultText = data.output.text;
+                        } else if (data.output.transcription) {
+                            resultText = data.output.transcription;
+                        } else if (data.output.result) {
+                            resultText = data.output.result;
+                        } else if (data.output.transcript) {
+                            resultText = data.output.transcript;
+                        } else {
+                            // 最後嘗試直接將對象轉為文本
+                            resultText = JSON.stringify(data.output, null, 2);
+                        }
+                        
+                        // 提取可能的指標
+                        const possibleMetrics = data.output.metrics || data.output.info || {};
+                        metrics = {
+                            processing_time: possibleMetrics.processing_time || 
+                                            possibleMetrics.total_time || 0,
+                            characters: possibleMetrics.characters || 
+                                       possibleMetrics.word_count || 0
+                        };
                     }
-                    
-                    // 處理指標
-                    if (data.output.metrics) {
-                        metrics = data.output.metrics;
-                    }
-                } else if (typeof data.output === 'string') {
-                    resultText = data.output;
                 }
+                
+                return {
+                    text: resultText,
+                    metrics: metrics
+                };
+            } catch (extractError) {
+                console.error('提取結果時出錯:', extractError);
+                // 仍然返回某些內容，避免undefined錯誤
+                return {
+                    text: `無法解析轉錄結果: ${extractError.message}\n原始數據: ${JSON.stringify(data)}`,
+                    metrics: { processing_time: 0, characters: 0 }
+                };
             }
-            
-            return {
-                text: resultText,
-                metrics: metrics
-            };
         } else if (data.status === 'FAILED') {
             throw new Error(data.error || '轉錄失敗');
         } else if (data.status === 'IN_QUEUE' && retryCount > 10) {
@@ -424,12 +445,105 @@ function updatePerformanceMetrics(metrics) {
     }
 }
 
-// ... 其他現有代碼 ... 
+// 在scripts.js開頭添加測試函數
+async function testRunPodConnection() {
+    try {
+        const response = await fetch(`https://api.runpod.ai/v2/2xi4wl5mf51083/health`, {
+            headers: {
+                'Authorization': `Bearer ${API_CONFIG.apiKey}`
+            }
+        });
+        
+        const data = await response.json();
+        console.log('RunPod連接測試:', data);
+        console.log('API金鑰長度:', API_CONFIG.apiKey?.length || 0);
+        console.log('API端點:', API_CONFIG.baseUrl);
+        return data;
+    } catch (error) {
+        console.error('連接測試失敗:', error);
+        return null;
+    }
+}
 
-// 簡化初始化過程，不進行API檢查
+// 在init函數中調用
 (function init() {
     console.log('應用初始化中...');
-    // 僅顯示API鑰匙狀態
     const apiKey = localStorage.getItem('temp_api_key');
     console.log('API金鑰狀態:', apiKey ? '已設置' : '未設置');
-})(); 
+    
+    // 添加自動連接測試
+    testRunPodConnection().then(status => {
+        if (status && status.ready) {
+            console.log('✅ RunPod服務可用');
+        } else {
+            console.warn('⚠️ RunPod服務可能不可用，請檢查設置');
+        }
+    });
+})();
+
+// 更完善的錯誤處理函數
+function handleApiError(error, context = '') {
+    const timestamp = new Date().toISOString();
+    const errorDetails = {
+        timestamp,
+        context,
+        message: error.message,
+        stack: error.stack
+    };
+    
+    console.error('詳細錯誤信息:', JSON.stringify(errorDetails, null, 2));
+    
+    // 顯示更具描述性的錯誤訊息
+    let userMessage = `操作失敗 [${timestamp}]\n`;
+    
+    if (error.message.includes('Cannot read properties')) {
+        userMessage += '後端返回的資料格式不正確，可能是API版本不匹配。\n';
+        userMessage += '建議檢查Docker映像版本與API請求格式是否一致。';
+    } else if (error.message.includes('等待任務完成超時')) {
+        userMessage += '任務處理時間過長。這可能是由於:\n';
+        userMessage += '1. RunPod服務器負載過高\n';
+        userMessage += '2. 輸入的媒體檔案過大\n';
+        userMessage += '3. 請求格式不被後端識別\n';
+        userMessage += '建議使用較短的YouTube片段再次嘗試。';
+    }
+    
+    return userMessage;
+}
+
+// 添加重試與嘗試不同格式的功能
+async function transcribeWithRetry(audioData, modelType, attempts = 0) {
+    if (attempts >= 2) {
+        throw new Error('多次嘗試後仍無法完成轉錄');
+    }
+    
+    try {
+        // 嘗試不同請求格式
+        const formatOptions = [
+            // 格式1
+            {
+                input: {
+                    audio: audioData,
+                    model: modelType,
+                    language: "auto"
+                }
+            },
+            // 格式2
+            {
+                input: {
+                    source_url: audioData,
+                    model_type: modelType,
+                    language_code: "auto"
+                }
+            }
+        ];
+        
+        const requestData = formatOptions[attempts];
+        console.log(`嘗試格式 ${attempts+1}:`, JSON.stringify(requestData, null, 2));
+        
+        // 其他代碼保持不變...
+    } catch (error) {
+        // 重試其他格式
+        console.warn(`格式 ${attempts+1} 失敗，嘗試其他格式...`);
+        return transcribeWithRetry(audioData, modelType, attempts + 1);
+    }
+} 

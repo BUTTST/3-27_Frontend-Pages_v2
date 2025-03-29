@@ -177,6 +177,14 @@
         </div>
     </div>
 
+    <!-- 在頁面底部添加測試按鈕（僅開發環境使用） -->
+    <div class="debug-panel" style="margin-top: 20px; padding: 10px; border: 1px dashed #ccc; display: none;">
+        <h3>除錯工具</h3>
+        <button id="test-api-btn" class="btn">測試API連接</button>
+        <button id="test-sample-btn" class="btn">使用樣本數據測試</button>
+        <div id="debug-output" style="margin-top: 10px; padding: 10px; background: #f5f5f5; max-height: 200px; overflow: auto;"></div>
+    </div>
+
     <script src="config.js"></script>
     <script src="scripts.js"></script>
     <script>
@@ -243,6 +251,37 @@
                 }
             });
         });
+
+        // 開發環境下顯示除錯面板
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            document.querySelector('.debug-panel').style.display = 'block';
+            
+            // 測試API連接
+            document.getElementById('test-api-btn').addEventListener('click', async () => {
+                const debugOutput = document.getElementById('debug-output');
+                debugOutput.innerHTML = '測試API連接中...';
+                
+                try {
+                    const status = await testRunPodConnection();
+                    debugOutput.innerHTML = `API狀態: ${JSON.stringify(status, null, 2)}`;
+                } catch (e) {
+                    debugOutput.innerHTML = `測試失敗: ${e.message}`;
+                }
+            });
+            
+            // 使用樣本數據測試
+            document.getElementById('test-sample-btn').addEventListener('click', async () => {
+                const debugOutput = document.getElementById('debug-output');
+                debugOutput.innerHTML = '發送樣本數據...';
+                
+                // 使用短YouTube片段做測試
+                linkInput.value = 'https://www.youtube.com/shorts/JdUjciCnS6g';
+                modelSelect.value = 'tiny';  // 使用最小模型加快測試
+                
+                // 手動觸發轉錄按鈕
+                transcribeButton.click();
+            });
+        }
     </script>
 </body>
 </html> 
