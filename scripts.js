@@ -51,147 +51,174 @@ fileInput.addEventListener('change', () => {
     }
 });
 
-// 執行轉譯按鈕點擊事件
-transcribeButton.addEventListener('click', async () => {
-    try {
-        // 顯示載入中覆蓋層
-        loadingOverlay.style.display = 'flex';
-        document.getElementById('output-text').value = "";
+// 轉譯主控制器
+const TranscriptionController = {
+    // 初始化函數
+    init() {
+        console.log('初始化轉譯控制器...');
         
-        // 設置處理中的提示文字
-        outputText.value = "準備處理您的請求...";
+        // 檢查API配置
+        const apiKey = localStorage.getItem('temp_api_key');
+        console.log('API金鑰狀態:', apiKey ? '已設置' : '未設置');
         
-        const audioData = await getAudioData();
-        const modelType = modelSelect.value;
+        // 自動檢查API服務健康狀態
+        this.checkApiHealth();
         
-        outputText.value = "連接API服務...";
-        
-        console.log('使用的API配置:', {
-            baseUrl: API_CONFIG.baseUrl,
-            apiKeyExists: !!API_CONFIG.apiKey
+        // 綁定界面事件
+        this.bindUIEvents();
+    },
+    
+    // 檢查API健康狀態
+    async checkApiHealth() {
+        try {
+            const status = await ApiService.checkHealth();
+            if (status && status.ready) {
+                console.log('✅ API服務正常運行');
+                this.showNotification('API服務連接正常', 'success');
+            } else {
+                console.warn('⚠️ API服務可能不可用');
+                this.showNotification('API服務可能不可用，請檢查設置', 'warning');
+            }
+        } catch (error) {
+            console.error('API健康檢查失敗:', error);
+            this.showNotification('無法連接到API服務', 'error');
+        }
+    },
+    
+    // 綁定UI事件
+    bindUIEvents() {
+        // 轉譯按鈕事件
+        document.getElementById('transcribe-button').addEventListener('click', async () => {
+            this.startTranscription();
         });
         
-        const result = await transcribeAudio(audioData, modelType);
+        // 其他UI事件...
+    },
+    
+    // 開始轉譯流程
+    async startTranscription() {
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const outputText = document.getElementById('output-text');
         
-        outputText.value = result.text;
-        updatePerformanceMetrics(result.metrics);
+        try {
+            // 顯示載入中
+            loadingOverlay.style.display = 'flex';
+            outputText.value = "準備處理您的請求...";
+            
+            // 1. 獲取輸入數據
+            const link = await this.getInputLink();
+            const modelType = document.getElementById('model-select').value;
+            const useTimestamps = document.getElementById('timestamp-checkbox').checked;
+            
+            outputText.value = "連接API服務...";
+            
+            // 2. 提交轉譯任務
+            console.log('開始轉譯:', { link, modelType, useTimestamps });
+            const jobResponse = await ApiService.submitTranscriptionJob(link, modelType, useTimestamps);
+            
+            // 3. 輪詢任務結果
+            outputText.value = "正在處理音訊，請稍候...\n\n任務ID: " + jobResponse.id;
+            
+            const result = await JobPoller.pollJobStatus(jobResponse.id, {
+                onProgress: (data) => {
+                    if (data.status === 'polling') {
+                        outputText.value = `正在處理音訊，請稍候...\n\n任務ID: ${jobResponse.id}\n輪詢次數: ${data.attempt}/${data.maxAttempts}`;
+                    }
+                }
+            });
+            
+            // 4. 顯示結果
+            outputText.value = result.text;
+            this.updatePerformanceMetrics(result.metrics);
+            
+            // 保存當前轉譯結果
+            this.currentTranscription = result.text;
+            this.hasTimestamps = useTimestamps;
+            
+            // 顯示成功通知
+            this.showNotification('轉譯完成！', 'success');
+        } catch (error) {
+            console.error('轉譯過程失敗:', error);
+            outputText.value = this.formatErrorMessage(error);
+            this.showNotification('轉譯失敗', 'error');
+        } finally {
+            loadingOverlay.style.display = 'none';
+        }
+    },
+    
+    // 獲取輸入連結
+    async getInputLink() {
+        const linkInput = document.getElementById('link-input');
+        const link = linkInput.value.trim();
         
-        // 顯示成功通知
-        showNotification('轉譯完成！', 'success');
-    } catch (error) {
-        const errorMessage = handleApiError(error, '轉錄過程');
-        showNotification('轉錄失敗', 'error');
-        outputText.value = errorMessage;
-    } finally {
-        loadingOverlay.style.display = 'none';
-    }
-});
-
-// 增加專門處理YouTube影片的函數
-function getYouTubeVideoId(url) {
-    // 識別YouTube短片和標準URL的正則表達式
-    const regExp = /^.*(?:youtu.be\/|v\/|shorts\/|e\/|u\/\w+\/|embed\/|v=)([^#\&\?]*).*/;
-    const match = url.match(regExp);
-    return (match && match[1].length === 11) ? match[1] : null;
-}
-
-// 更新 getAudioData 函數以正確處理 YouTube 連結
-async function getAudioData() {
-    const link = linkInput.value.trim();
-    if (link) {
-        // YouTube 連結處理
+        if (!link) {
+            throw new Error('請提供影片連結');
+        }
+        
+        // 處理YouTube連結
         if (link.includes('youtube.com') || link.includes('youtu.be')) {
-            const videoId = getYouTubeVideoId(link);
-            if (videoId) {
-                console.log('檢測到YouTube視頻，ID:', videoId);
-                
-                // 確保使用完整 URL 格式
-                const fullUrl = link.includes('shorts') 
-                    ? `https://www.youtube.com/shorts/${videoId}`
-                    : `https://www.youtube.com/watch?v=${videoId}`;
-                
-                console.log('處理YouTube視頻URL:', fullUrl);
-                return fullUrl;
-            }
+            return this.processYoutubeLink(link);
         }
+        
         return link;
-    }
-
-    // 檢查是否有文件輸入
-    const file = fileInput.files[0];
-    if (file) {
-        // 暫時不支持文件上傳
-        throw new Error('目前僅支持網址轉譯，檔案上傳功能即將推出');
-    }
-
-    throw new Error('請提供影片連結');
-}
-
-// 修改 transcribeAudio 函數以符合RunPod API格式要求
-async function transcribeAudio(audioData, modelType) {
-    try {
-        // 檢查是否已設置API金鑰
-        if (!API_CONFIG.apiKey) {
-            throw new Error('未設置API金鑰，請先設置API金鑰');
+    },
+    
+    // 處理YouTube連結
+    processYoutubeLink(link) {
+        console.log('處理YouTube連結:', link);
+        // 獲取YouTube ID (如果需要)
+        return link;
+    },
+    
+    // 更新性能指標
+    updatePerformanceMetrics(metrics) {
+        if (!metrics) return;
+        
+        try {
+            const totalTimeDisplay = document.getElementById('total-time');
+            const wordCountDisplay = document.getElementById('word-count');
+            
+            totalTimeDisplay.textContent = `總時間: ${metrics.total_time || 0}秒`;
+            wordCountDisplay.textContent = `字數: ${metrics.word_count || 0}`;
+        } catch (error) {
+            console.error('更新性能指標錯誤:', error);
         }
-
-        console.log('發送請求到:', API_CONFIG.baseUrl);
-        console.log('使用模型:', modelType);
+    },
+    
+    // 顯示通知
+    showNotification(message, type = 'info') {
+        const notification = document.getElementById('notification');
+        if (!notification) return;
         
-        // 嘗試匹配後端handler函數期望的格式
-        const requestData = {
-            input: {
-                link: audioData,              // 使用link而非source_url
-                model: modelType,
-                timestamps: timestampCheckbox.checked
-            }
-        };
+        notification.textContent = message;
+        notification.className = `notification ${type}`;
+        notification.style.display = 'block';
         
-        console.log('請求資料:', JSON.stringify(requestData, null, 2));
+        setTimeout(() => {
+            notification.style.display = 'none';
+        }, 5000);
+    },
+    
+    // 格式化錯誤消息
+    formatErrorMessage(error) {
+        const timestamp = new Date().toLocaleTimeString();
+        let message = `操作失敗 [${timestamp}]\n${error.message}\n\n`;
         
-        // 設置正確的請求格式
-        const response = await fetch(API_CONFIG.baseUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${API_CONFIG.apiKey}`
-            },
-            body: JSON.stringify(requestData)
-        });
-
-        // 顯示詳細的請求與響應信息
-        console.log('HTTP狀態碼:', response.status);
-        console.log('回應頭:', Object.fromEntries(response.headers.entries()));
-        
-        if (!response.ok) {
-            let errorMessage = `API錯誤: ${response.status}`;
-            try {
-                const errorData = await response.text();
-                console.error('API錯誤詳情:', errorData);
-                errorMessage += ` - ${errorData}`;
-            } catch (e) {
-                console.error('無法解析錯誤詳情');
-            }
-            throw new Error(errorMessage);
-        }
-
-        // 解析響應
-        const data = await response.json();
-        console.log('收到回應:', data);
-        
-        // 處理異步任務
-        if (data.id) {
-            document.getElementById('output-text').value = "正在處理音訊，請稍候...";
-            console.log(`任務已提交，ID: ${data.id}`);
-            return await pollResult(data.id);
+        // 添加上下文相關的提示
+        if (error.message.includes('API金鑰未設置')) {
+            message += '請點擊"設置API金鑰"按鈕設置您的API金鑰。';
+        } else if (error.message.includes('輪詢超時')) {
+            message += '可能原因:\n';
+            message += '1. 服務器處理負載較高\n';
+            message += '2. 影片過長或格式不支持\n';
+            message += '建議選擇較短的視頻再次嘗試。';
+        } else if (error.message.includes('無法連接')) {
+            message += '請檢查您的網絡連接或API服務是否可用。';
         }
         
-        return data;
-    } catch (error) {
-        console.error('轉譯請求失敗:', error);
-        throw error;
+        return message;
     }
-}
+};
 
 // 複製按鈕點擊事件
 copyButton.addEventListener('click', () => {
@@ -263,18 +290,6 @@ async function downloadTranscription(format) {
     } finally {
         loadingOverlay.classList.add('hidden');
     }
-}
-
-// 顯示通知
-function showNotification(message, type = 'info') {
-    const notification = document.getElementById('notification');
-    notification.textContent = message;
-    notification.className = `notification ${type}`;
-    notification.style.display = 'block';
-    
-    setTimeout(() => {
-        notification.style.display = 'none';
-    }, 5000);
 }
 
 // 啟用操作按鈕
@@ -400,14 +415,6 @@ async function pollResult(jobId, retryCount = 0) {
     } catch (error) {
         console.error('輪詢結果錯誤:', error);
         throw error;
-    }
-}
-
-// 更新性能指標
-function updatePerformanceMetrics(metrics) {
-    if (metrics) {
-        totalTimeDisplay.textContent = `總時間: ${metrics.total_time.toFixed(2)}秒`;
-        wordCountDisplay.textContent = `字數: ${metrics.word_count}`;
     }
 }
 
@@ -634,4 +641,284 @@ async function testRunpodApi() {
         console.error('API測試失敗:', error);
         return `API測試失敗: ${error.message}`;
     }
-} 
+}
+
+// API服務模塊 - 集中管理所有API相關功能
+const ApiService = {
+    // 取得API配置
+    config: {
+        baseUrl: 'https://api.runpod.ai/v2/2xi4wl5mf51083/run',
+        statusUrl: 'https://api.runpod.ai/v2/2xi4wl5mf51083/status',
+        healthUrl: 'https://api.runpod.ai/v2/2xi4wl5mf51083/health',
+        
+        // 安全地獲取API金鑰
+        get apiKey() {
+            const key = localStorage.getItem('temp_api_key');
+            if (!key) {
+                console.warn('API金鑰未設置');
+                return '';
+            }
+            return key;
+        }
+    },
+    
+    // 檢查API服務健康狀態
+    async checkHealth() {
+        console.log('檢查API服務健康狀態...');
+        try {
+            const response = await fetch(this.config.healthUrl, {
+                headers: { 'Authorization': `Bearer ${this.config.apiKey}` }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`健康檢查失敗: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            console.log('API健康狀態:', data);
+            return data;
+        } catch (error) {
+            console.error('健康檢查錯誤:', error);
+            throw error;
+        }
+    },
+    
+    // 提交轉譯任務 - 嚴格遵循後端handler函數期望的格式
+    async submitTranscriptionJob(link, modelType, useTimestamps) {
+        console.log('提交轉譯任務...');
+        
+        // 檢查API金鑰
+        if (!this.config.apiKey) {
+            throw new Error('API金鑰未設置，請先設置API金鑰');
+        }
+        
+        // 構建請求數據 - 與後端handler函數參數完全匹配
+        const requestData = {
+            input: {
+                link: link,               // 使用link參數
+                model: modelType,         // 模型名稱
+                timestamps: useTimestamps // 時間戳選項
+            }
+        };
+        
+        console.log('請求數據:', JSON.stringify(requestData, null, 2));
+        
+        try {
+            const response = await fetch(this.config.baseUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.config.apiKey}`
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            console.log('API響應狀態:', response.status);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`API錯誤 (${response.status}): ${errorText}`);
+            }
+            
+            const data = await response.json();
+            console.log('任務提交響應:', data);
+            
+            // 確認回應中包含任務ID
+            if (!data.id) {
+                throw new Error('API響應中缺少任務ID');
+            }
+            
+            return data;
+        } catch (error) {
+            console.error('提交任務失敗:', error);
+            throw error;
+        }
+    },
+    
+    // 獲取任務狀態
+    async getJobStatus(jobId) {
+        if (!jobId) {
+            throw new Error('需要提供任務ID');
+        }
+        
+        try {
+            const statusUrl = `${this.config.statusUrl}/${jobId}`;
+            console.log('檢查任務狀態:', statusUrl);
+            
+            const response = await fetch(statusUrl, {
+                headers: { 'Authorization': `Bearer ${this.config.apiKey}` }
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`狀態檢查失敗 (${response.status}): ${errorText}`);
+            }
+            
+            const data = await response.json();
+            console.log(`任務 ${jobId} 狀態:`, data);
+            return data;
+        } catch (error) {
+            console.error(`檢查任務 ${jobId} 狀態失敗:`, error);
+            throw error;
+        }
+    }
+};
+
+// 任務輪詢模塊 - 處理長時間運行的任務
+const JobPoller = {
+    // 輪詢任務狀態，使用指數退避策略
+    async pollJobStatus(jobId, options = {}) {
+        const defaults = {
+            maxRetries: 45,                    // 最大重試次數  
+            initialInterval: 3000,             // 初始間隔(毫秒)
+            maxInterval: 15000,                // 最大間隔(毫秒)
+            backoffFactor: 1.5,                // 退避因子
+            onProgress: (status, attempt) => {} // 進度回調函數
+        };
+        
+        const config = { ...defaults, ...options };
+        let attempt = 0;
+        let interval = config.initialInterval;
+        
+        while (attempt < config.maxRetries) {
+            attempt++;
+            
+            try {
+                // 回調函數更新進度
+                config.onProgress({ status: 'polling', attempt, maxAttempts: config.maxRetries });
+                
+                // 獲取任務狀態
+                const jobStatus = await ApiService.getJobStatus(jobId);
+                
+                // 根據任務狀態處理
+                if (jobStatus.status === 'COMPLETED') {
+                    console.log('任務完成:', jobStatus);
+                    return this.processCompletedJob(jobStatus);
+                } else if (jobStatus.status === 'FAILED') {
+                    console.error('任務失敗:', jobStatus);
+                    throw new Error(jobStatus.error || '任務處理失敗');
+                } else if (jobStatus.status === 'IN_QUEUE') {
+                    if (attempt > 10) {
+                        console.warn(`任務在隊列中等待較長時間 (${attempt}/${config.maxRetries})`);
+                    }
+                }
+                
+                // 計算下一次等待時間
+                interval = Math.min(interval * config.backoffFactor, config.maxInterval);
+                console.log(`任務狀態: ${jobStatus.status}，等待 ${interval/1000} 秒後重試...`);
+                
+                // 等待下一次輪詢
+                await new Promise(resolve => setTimeout(resolve, interval));
+            } catch (error) {
+                console.error(`輪詢第 ${attempt} 次失敗:`, error);
+                
+                // 短暫等待後重試
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            }
+        }
+        
+        // 超過重試次數
+        throw new Error(`輪詢超時：任務 ${jobId} 在 ${config.maxRetries} 次嘗試後仍未完成`);
+    },
+    
+    // 處理已完成的任務結果
+    processCompletedJob(jobStatus) {
+        // 確保輸出存在
+        if (!jobStatus.output) {
+            throw new Error('任務完成但缺少輸出數據');
+        }
+        
+        // 解析輸出數據
+        try {
+            let transcription = '';
+            let performance = {};
+            
+            // 處理各種可能的輸出格式
+            if (typeof jobStatus.output === 'string') {
+                transcription = jobStatus.output;
+            } else if (typeof jobStatus.output === 'object') {
+                // 處理標準格式
+                transcription = jobStatus.output.transcription || 
+                               jobStatus.output.text || 
+                               JSON.stringify(jobStatus.output);
+                
+                // 提取性能指標
+                performance = jobStatus.output.performance || 
+                             jobStatus.output.metrics || 
+                             {};
+            }
+            
+            return {
+                text: transcription,
+                metrics: performance
+            };
+        } catch (error) {
+            console.error('處理任務結果失敗:', error);
+            throw new Error(`無法解析轉譯結果: ${error.message}`);
+        }
+    }
+};
+
+// 頁面加載時初始化應用
+document.addEventListener('DOMContentLoaded', () => {
+    // 初始化轉譯控制器
+    TranscriptionController.init();
+    
+    // 檢查是否在開發環境中，添加調試功能
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        initDebugTools();
+    }
+});
+
+// 初始化調試工具
+function initDebugTools() {
+    console.log('初始化調試工具...');
+    
+    // 添加調試面板到頁面
+    const debugPanel = document.createElement('div');
+    debugPanel.className = 'debug-panel';
+    debugPanel.innerHTML = `
+        <h3>調試工具</h3>
+        <button id="test-health-btn">檢查API健康狀態</button>
+        <button id="test-sample-btn">測試樣本視頻</button>
+        <pre id="debug-output"></pre>
+    `;
+    document.body.appendChild(debugPanel);
+    
+    // 綁定調試按鈕事件
+    document.getElementById('test-health-btn').addEventListener('click', async () => {
+        const output = document.getElementById('debug-output');
+        output.textContent = '檢查API健康狀態...';
+        
+        try {
+            const status = await ApiService.checkHealth();
+            output.textContent = JSON.stringify(status, null, 2);
+        } catch (error) {
+            output.textContent = `錯誤: ${error.message}`;
+        }
+    });
+    
+    document.getElementById('test-sample-btn').addEventListener('click', () => {
+        document.getElementById('link-input').value = 'https://www.youtube.com/shorts/JdUjciCnS6g';
+        document.getElementById('model-select').value = 'tiny';
+        document.getElementById('transcribe-button').click();
+    });
+}
+
+// 全域錯誤處理
+window.addEventListener('error', (event) => {
+    console.error('全域錯誤:', event.error);
+    
+    // 向用戶顯示友好的錯誤消息
+    const notification = document.getElementById('notification');
+    if (notification) {
+        notification.textContent = '發生意外錯誤，請刷新頁面重試';
+        notification.className = 'notification error';
+        notification.style.display = 'block';
+    }
+});
+
+// 處理未捕獲的Promise錯誤
+window.addEventListener('unhandledrejection', (event) => {
+    console.error('未處理的Promise錯誤:', event.reason);
+}); 
