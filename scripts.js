@@ -3,11 +3,7 @@
 //     baseUrl: 'http://localhost:7860' // 開發環境，部署時修改
 // };
 
-// 改為從config.js導入
-import { API_CONFIG } from './config.js';
-
-// 移除所有RunPod直接配置
-// 所有API呼叫透過我們的後端進行，不再直接呼叫RunPod API
+// 直接使用全局的API_CONFIG變量
 
 // DOM 元素
 const linkInput = document.getElementById('link-input');
@@ -87,6 +83,17 @@ transcribeButton.addEventListener('click', async () => {
         const audioData = await getAudioData(); // 獲取音頻數據
         const modelType = modelSelect.value;
         
+        console.log('使用的API配置:', {
+            baseUrl: API_CONFIG.baseUrl,
+            apiKeyExists: !!API_CONFIG.apiKey
+        });
+        
+        console.log('發送的數據:', {
+            url: audioData,
+            model: modelType,
+            timestamps: timestampCheckbox.checked
+        });
+        
         const result = await transcribeAudio(audioData, modelType);
         
         outputText.value = result.text;
@@ -146,8 +153,8 @@ async function transcribeAudio(audioData, modelType) {
                 'Authorization': `Bearer ${API_CONFIG.apiKey}`
             },
             body: JSON.stringify({
-                input: {  // 添加input包裹層
-                    url: audioData.content,  // 正確獲取URL內容
+                input: {  // 確保有這個input包裹層
+                    url: audioData.content,
                     model: modelType,
                     timestamps: timestampCheckbox.checked
                 }
