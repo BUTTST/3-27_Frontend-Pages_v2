@@ -20,7 +20,7 @@
         </div>
 
         <div class="api-settings-button">
-            <a href="admin.html" target="_blank" class="btn btn-outline">
+            <a href="#" class="btn btn-outline">
                 <i class="fas fa-key"></i> 設置API金鑰
             </a>
         </div>
@@ -160,6 +160,23 @@
         </footer>
     </div>
 
+    <!-- API金鑰設置模態框 -->
+    <div id="api-key-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h2>設置API金鑰</h2>
+            <div class="form-group">
+                <label for="modal-api-key">API 金鑰</label>
+                <input type="text" id="modal-api-key" placeholder="輸入您的API金鑰，例如: rpa_XXXXXXXX">
+                <p class="note">請輸入：rpa_KNDRDYDASZBFM7S43LT9VUMVO6O3EMR7L132LH2Z8koxcv</p>
+            </div>
+            <button id="modal-save-button" class="primary-button">
+                <i class="fas fa-save"></i> 保存設定
+            </button>
+            <div id="modal-status" class="success-message" style="display: none;"></div>
+        </div>
+    </div>
+
     <script src="config.js"></script>
     <script src="scripts.js"></script>
     <script>
@@ -168,7 +185,63 @@
             const hasApiKey = localStorage.getItem('temp_api_key');
             if (!hasApiKey && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
                 document.getElementById('api-key-notice').style.display = 'block';
+                // 自動顯示模態框
+                document.getElementById('api-key-modal').style.display = 'block';
             }
+            
+            // 模態框相關功能
+            const modal = document.getElementById('api-key-modal');
+            const closeButton = document.querySelector('.close-button');
+            const apiKeyButtons = document.querySelectorAll('.api-settings-button .btn');
+            const saveButton = document.getElementById('modal-save-button');
+            const apiKeyInput = document.getElementById('modal-api-key');
+            const statusMessage = document.getElementById('modal-status');
+            
+            // 載入已存儲的API金鑰
+            const savedKey = localStorage.getItem('temp_api_key');
+            if (savedKey) {
+                apiKeyInput.value = savedKey;
+            }
+            
+            // 點擊設置API金鑰按鈕打開模態框
+            apiKeyButtons.forEach(button => {
+                button.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    modal.style.display = 'block';
+                });
+            });
+            
+            // 點擊關閉按鈕關閉模態框
+            closeButton.addEventListener('click', function() {
+                modal.style.display = 'none';
+            });
+            
+            // 點擊模態框外部關閉模態框
+            window.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    modal.style.display = 'none';
+                }
+            });
+            
+            // 保存API金鑰
+            saveButton.addEventListener('click', function() {
+                const apiKey = apiKeyInput.value.trim();
+                if (apiKey) {
+                    localStorage.setItem('temp_api_key', apiKey);
+                    statusMessage.textContent = 'API金鑰已保存！您現在可以開始使用轉錄服務。';
+                    statusMessage.style.display = 'block';
+                    
+                    // 隱藏API金鑰警告
+                    document.getElementById('api-key-notice').style.display = 'none';
+                    
+                    // 3秒後自動關閉模態框
+                    setTimeout(function() {
+                        modal.style.display = 'none';
+                    }, 3000);
+                } else {
+                    alert('請輸入有效的API金鑰');
+                }
+            });
         });
     </script>
 </body>
