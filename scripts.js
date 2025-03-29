@@ -54,28 +54,33 @@ fileInput.addEventListener('change', () => {
 // 執行轉譯按鈕點擊事件
 transcribeButton.addEventListener('click', async () => {
     try {
+        // 顯示載入中覆蓋層
         loadingOverlay.style.display = 'flex';
+        document.getElementById('output-text').value = "";
         
-        const audioData = await getAudioData(); // 獲取音頻數據
+        // 設置處理中的提示文字
+        outputText.value = "準備處理您的請求...";
+        
+        const audioData = await getAudioData();
         const modelType = modelSelect.value;
+        
+        outputText.value = "連接API服務...";
         
         console.log('使用的API配置:', {
             baseUrl: API_CONFIG.baseUrl,
             apiKeyExists: !!API_CONFIG.apiKey
         });
         
-        console.log('發送的數據:', {
-            url: audioData,
-            model: modelType,
-            timestamps: timestampCheckbox.checked
-        });
-        
         const result = await transcribeAudio(audioData, modelType);
         
         outputText.value = result.text;
         updatePerformanceMetrics(result.metrics);
+        
+        // 顯示成功通知
+        showNotification('轉譯完成！', 'success');
     } catch (error) {
         showNotification('轉錄失敗：' + error.message, 'error');
+        outputText.value = `處理過程中出錯：${error.message}\n\n請檢查網址是否有效，或稍後再試。`;
     } finally {
         loadingOverlay.style.display = 'none';
     }
@@ -105,11 +110,21 @@ async function transcribeAudio(audioData, modelType) {
     try {
         // 檢查是否已設置API金鑰
         if (!API_CONFIG.apiKey) {
-            throw new Error('未設置API金鑰，請點擊頁面頂部的"設置API金鑰"按鈕');
+            throw new Error('未設置API金鑰，請先設置API金鑰');
         }
 
         console.log('發送請求到:', API_CONFIG.baseUrl);
-        console.log('使用金鑰:', API_CONFIG.apiKey.substring(0, 8) + '...');
+        console.log('使用模型:', modelType);
+        
+        const requestData = {
+            input: {
+                url: audioData,
+                model: modelType,
+                timestamps: timestampCheckbox.checked
+            }
+        };
+        
+        console.log('請求資料:', JSON.stringify(requestData, null, 2));
         
         // 設置正確的請求格式
         const response = await fetch(API_CONFIG.baseUrl, {
@@ -118,19 +133,22 @@ async function transcribeAudio(audioData, modelType) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${API_CONFIG.apiKey}`
             },
-            body: JSON.stringify({
-                input: {
-                    url: audioData, // 直接使用URL字符串
-                    model: modelType,
-                    timestamps: timestampCheckbox.checked
-                }
-            })
+            body: JSON.stringify(requestData)
         });
 
+        // 完整記錄回應資訊
+        console.log('回應狀態:', response.status);
+        
         if (!response.ok) {
-            const errorText = await response.text();
-            console.error('API回應錯誤:', errorText);
-            throw new Error(`API錯誤: ${response.status}`);
+            let errorMessage = `API錯誤: ${response.status}`;
+            try {
+                const errorData = await response.text();
+                console.error('API錯誤詳情:', errorData);
+                errorMessage += ` - ${errorData}`;
+            } catch (e) {
+                console.error('無法解析錯誤詳情');
+            }
+            throw new Error(errorMessage);
         }
 
         // 解析響應
@@ -139,6 +157,7 @@ async function transcribeAudio(audioData, modelType) {
         
         // 處理異步任務
         if (data.id) {
+            document.getElementById('output-text').value = "正在處理音訊，請稍候...";
             console.log(`任務已提交，ID: ${data.id}`);
             return await pollResult(data.id);
         }
@@ -264,10 +283,15 @@ async function transcribeYouTubeLink() {
 }
 
 // 更新輪詢函數使用正確的URL格式
-async function pollResult(jobId) {
+async function pollResult(jobId, retryCount = 0) {
+    // 最多嘗試30次，每次間隔3秒，總計最多等待90秒
+    if (retryCount >= 30) {
+        throw new Error('等待任務完成超時，請稍後再試');
+    }
+    
     try {
-        // 修正URL格式：使用RunPod的標準格式
-        const statusUrl = `${API_CONFIG.baseUrl.replace('/run', '')}/status/${jobId}`;
+        // 修正URL格式 - 這是關鍵修改
+        const statusUrl = `https://api.runpod.ai/v2/2xi4wl5mf51083/status/${jobId}`;
         
         console.log(`輪詢任務狀態: ${statusUrl}`);
         
@@ -283,22 +307,29 @@ async function pollResult(jobId) {
         
         // 處理響應數據
         const data = await response.json();
+        console.log("輪詢結果:", data);
         
         if (data.status === 'COMPLETED') {
             console.log('轉譯任務完成');
-            // 處理成功結果
-            return {
-                text: data.output.transcription || data.output || "無轉譯結果",
-                metrics: data.output.performance || { total_time: 0, word_count: 0 }
-            };
+            // 修正輸出處理邏輯
+            if (data.output && typeof data.output === 'object') {
+                return {
+                    text: data.output.transcription || "無轉譯結果",
+                    metrics: data.output.metrics || { total_time: 0, word_count: 0 }
+                };
+            } else {
+                return {
+                    text: String(data.output || "無轉譯結果"),
+                    metrics: { total_time: 0, word_count: 0 }
+                };
+            }
         } else if (data.status === 'FAILED') {
-            // 處理失敗
             throw new Error(data.error || '轉錄失敗');
         } else {
-            // 繼續輪詢 (等待2秒)
+            // 增加等待時間和重試次數限制
             console.log(`任務狀態: ${data.status}，繼續等待...`);
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            return pollResult(jobId);
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            return pollResult(jobId, retryCount + 1);
         }
     } catch (error) {
         console.error('輪詢結果錯誤:', error);
