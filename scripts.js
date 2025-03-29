@@ -579,4 +579,59 @@ async function testDirectApiCall() {
             message: `測試失敗: ${error.message}`
         };
     }
+}
+
+// 添加到scripts.js底部
+async function testRunpodApi() {
+    try {
+        // 基本連接測試
+        const healthResponse = await fetch(`https://api.runpod.ai/v2/2xi4wl5mf51083/health`, {
+            headers: {
+                'Authorization': `Bearer ${API_CONFIG.apiKey}`
+            }
+        });
+        
+        console.log('健康檢查狀態:', healthResponse.status);
+        console.log('健康檢查結果:', await healthResponse.json());
+        
+        // 發送極簡測試請求
+        const testResponse = await fetch(API_CONFIG.baseUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_CONFIG.apiKey}`
+            },
+            body: JSON.stringify({
+                input: {
+                    link: "https://www.youtube.com/shorts/JdUjciCnS6g",
+                    model: "tiny"
+                }
+            })
+        });
+        
+        console.log('測試請求狀態:', testResponse.status);
+        const result = await testResponse.json();
+        console.log('測試請求結果:', result);
+        
+        if (result.id) {
+            console.log('成功獲取任務ID，開始檢查任務狀態');
+            
+            // 等待3秒
+            await new Promise(r => setTimeout(r, 3000));
+            
+            // 檢查任務狀態
+            const statusResponse = await fetch(`https://api.runpod.ai/v2/2xi4wl5mf51083/status/${result.id}`, {
+                headers: {
+                    'Authorization': `Bearer ${API_CONFIG.apiKey}`
+                }
+            });
+            
+            console.log('狀態檢查結果:', await statusResponse.json());
+        }
+        
+        return "API測試完成，請檢查控制台日誌";
+    } catch (error) {
+        console.error('API測試失敗:', error);
+        return `API測試失敗: ${error.message}`;
+    }
 } 
