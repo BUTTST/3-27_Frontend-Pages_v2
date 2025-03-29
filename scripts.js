@@ -86,12 +86,27 @@ transcribeButton.addEventListener('click', async () => {
     }
 });
 
-// 獲取音頻數據的函數
+// 增加專門處理YouTube影片的函數
+function getYouTubeVideoId(url) {
+    // 識別YouTube短片和標準URL的正則表達式
+    const regExp = /^.*(?:youtu.be\/|v\/|shorts\/|e\/|u\/\w+\/|embed\/|v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[1].length === 11) ? match[1] : null;
+}
+
+// 在getAudioData函數中專門處理YouTube連結
 async function getAudioData() {
-    // 檢查是否有 URL 輸入
     const link = linkInput.value.trim();
     if (link) {
-        // 直接返回URL字符串，而不是對象
+        // 檢查是否為YouTube連結
+        if (link.includes('youtube.com') || link.includes('youtu.be')) {
+            const videoId = getYouTubeVideoId(link);
+            if (videoId) {
+                console.log('檢測到YouTube視頻，ID:', videoId);
+                // 可以選擇直接返回視頻ID或完整URL
+                return link; // 或考慮 return `https://www.youtube.com/watch?v=${videoId}`;
+            }
+        }
         return link;
     }
 
@@ -118,8 +133,10 @@ async function transcribeAudio(audioData, modelType) {
         
         const requestData = {
             input: {
-                audio: audioData,
-                model_name: modelType,
+                source_url: audioData,
+                model: modelType,
+                language: "auto",
+                task: "transcribe",
                 timestamps: timestampCheckbox.checked
             }
         };
@@ -290,6 +307,32 @@ async function pollResult(jobId, retryCount = 0) {
     }
     
     try {
+        // 在輪詢前增加輔助函數，用於檢查RunPod端點狀態
+        async function checkRunPodEndpointStatus() {
+            try {
+                const response = await fetch(`https://api.runpod.ai/v2/2xi4wl5mf51083/health`, {
+                    headers: {
+                        'Authorization': `Bearer ${API_CONFIG.apiKey}`
+                    }
+                });
+                const data = await response.json();
+                console.log('RunPod端點狀態:', data);
+                return data;
+            } catch (error) {
+                console.error('無法檢查RunPod端點狀態:', error);
+                return null;
+            }
+        }
+
+        // 在第一次輪詢前調用此函數
+        if (retryCount === 0) {
+            console.log('檢查RunPod端點狀態...');
+            const status = await checkRunPodEndpointStatus();
+            if (status && !status.ready) {
+                console.warn('RunPod端點未就緒，這可能導致任務處理延遲');
+            }
+        }
+
         // 更詳細的日誌
         console.log(`輪詢任務 #${retryCount+1}: ${jobId}`);
         document.getElementById('output-text').value = `正在處理音訊，請稍候...\n\n任務ID: ${jobId}\n輪詢次數: ${retryCount+1}/30`;
@@ -314,28 +357,57 @@ async function pollResult(jobId, retryCount = 0) {
         console.log("輪詢結果:", data);
         
         if (data.status === 'COMPLETED') {
-            console.log('轉譯任務完成');
-            // 修正輸出處理邏輯
-            if (data.output && typeof data.output === 'object') {
-                return {
-                    text: data.output.transcription || "無轉譯結果",
-                    metrics: data.output.metrics || { total_time: 0, word_count: 0 }
-                };
-            } else {
-                return {
-                    text: String(data.output || "無轉譯結果"),
-                    metrics: { total_time: 0, word_count: 0 }
-                };
+            console.log('轉譯任務完成，完整回應:', data);
+            
+            // 更好的結果處理邏輯
+            let resultText = "無轉譯結果";
+            let metrics = { total_time: 0, word_count: 0 };
+            
+            // 處理各種可能的回應格式
+            if (data.output) {
+                if (typeof data.output === 'object') {
+                    if (data.output.transcription) {
+                        resultText = data.output.transcription;
+                    } else if (data.output.text) {
+                        resultText = data.output.text;
+                    } else if (data.output.result) {
+                        resultText = data.output.result;
+                    }
+                    
+                    // 處理指標
+                    if (data.output.metrics) {
+                        metrics = data.output.metrics;
+                    }
+                } else if (typeof data.output === 'string') {
+                    resultText = data.output;
+                }
             }
+            
+            return {
+                text: resultText,
+                metrics: metrics
+            };
         } else if (data.status === 'FAILED') {
             throw new Error(data.error || '轉錄失敗');
         } else if (data.status === 'IN_QUEUE' && retryCount > 10) {
-            console.warn(`任務長時間在隊列中(${retryCount}次輪詢)，嘗試重新提交...`);
-            // 選擇性重新提交或取消
+            console.warn(`任務長時間在隊列中(${retryCount}次輪詢)，嘗試重新取得狀態...`);
+            
+            // 給使用者更新進度
+            document.getElementById('output-text').value = 
+                "任務在處理隊列中等待時間較長...\n" +
+                "這可能是因為RunPod伺服器較忙，請耐心等待。\n\n" +
+                `任務ID: ${jobId}\n輪詢次數: ${retryCount+1}/30\n\n` +
+                "如果等待超過5分鐘仍無回應，可以嘗試重新提交。";
+            
+            // 超過20次輪詢時，建議用戶重新嘗試
+            if (retryCount > 20) {
+                throw new Error("任務等待時間過長，請嘗試重新提交或選擇較短的影片");
+            }
         } else {
-            // 增加等待時間和重試次數限制
-            console.log(`任務狀態: ${data.status}，繼續等待...`);
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            // 修改等待時間策略，根據輪詢次數動態調整
+            const waitTime = Math.min(3000 + (retryCount * 500), 10000); // 從3秒開始，最多增加到10秒
+            console.log(`任務狀態: ${data.status}，等待 ${waitTime/1000} 秒後再次檢查...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
             return pollResult(jobId, retryCount + 1);
         }
     } catch (error) {
