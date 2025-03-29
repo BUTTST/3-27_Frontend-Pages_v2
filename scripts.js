@@ -130,9 +130,15 @@ async function getAudioData() {
     throw new Error('請提供影片連結或上傳音頻文件');
 }
 
-// 修改 transcribeAudio 函數以添加API金鑰
+// 修改 transcribeAudio 函數以符合RunPod API格式要求
 async function transcribeAudio(audioData, modelType) {
     try {
+        // 檢查是否已設置API金鑰
+        if (!API_CONFIG.apiKey) {
+            throw new Error('未設置API金鑰，請先前往admin.html頁面設置');
+        }
+
+        // 設置正確的請求格式
         const response = await fetch(API_CONFIG.baseUrl, {
             method: 'POST',
             headers: {
@@ -140,16 +146,29 @@ async function transcribeAudio(audioData, modelType) {
                 'Authorization': `Bearer ${API_CONFIG.apiKey}`
             },
             body: JSON.stringify({
-                url: audioData,
-                model: modelType
+                input: {  // 添加input包裹層
+                    url: audioData.content,  // 正確獲取URL內容
+                    model: modelType,
+                    timestamps: timestampCheckbox.checked
+                }
             })
         });
 
         if (!response.ok) {
-            throw new Error(`API錯誤: ${response.status}`);
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `API錯誤: ${response.status}`);
         }
 
-        return await response.json();
+        // 解析響應
+        const data = await response.json();
+        
+        // 處理異步任務
+        if (data.id) {
+            console.log(`任務已提交，ID: ${data.id}`);
+            return await pollResult(data.id);
+        }
+        
+        return data;
     } catch (error) {
         console.error('轉譯請求失敗:', error);
         throw error;
@@ -269,34 +288,40 @@ async function transcribeYouTubeLink() {
     // ... 確保不使用API金鑰 ...
 }
 
-// 修改輪詢函數，添加授權頭
+// 更新輪詢函數使用正確的URL格式
 async function pollResult(jobId) {
     try {
-        // 準備請求頭
-        const headers = {};
-        if (API_CONFIG.apiKey) {
-            headers['Authorization'] = `Bearer ${API_CONFIG.apiKey}`;
-        }
+        // 修正URL格式：使用RunPod的標準格式
+        const statusUrl = `${API_CONFIG.baseUrl.replace('/run', '')}/status/${jobId}`;
         
-        // 輪詢結果
-        const response = await fetch(`${API_CONFIG.baseUrl}/status/${jobId}`, {
-            headers: headers
+        console.log(`輪詢任務狀態: ${statusUrl}`);
+        
+        const response = await fetch(statusUrl, {
+            headers: {
+                'Authorization': `Bearer ${API_CONFIG.apiKey}`
+            }
         });
+        
+        if (!response.ok) {
+            throw new Error(`狀態查詢失敗: ${response.status}`);
+        }
         
         // 處理響應數據
         const data = await response.json();
         
         if (data.status === 'COMPLETED') {
+            console.log('轉譯任務完成');
             // 處理成功結果
             return {
-                text: data.output.transcription,
-                metrics: data.output.performance
+                text: data.output.transcription || data.output || "無轉譯結果",
+                metrics: data.output.performance || { total_time: 0, word_count: 0 }
             };
         } else if (data.status === 'FAILED') {
             // 處理失敗
             throw new Error(data.error || '轉錄失敗');
         } else {
-            // 繼續輪詢
+            // 繼續輪詢 (等待2秒)
+            console.log(`任務狀態: ${data.status}，繼續等待...`);
             await new Promise(resolve => setTimeout(resolve, 2000));
             return pollResult(jobId);
         }
@@ -315,3 +340,16 @@ function updatePerformanceMetrics(metrics) {
 }
 
 // ... 其他現有代碼 ... 
+
+document.addEventListener('DOMContentLoaded', function() {
+    // 檢查API金鑰是否已設置
+    const apiKey = localStorage.getItem('temp_api_key');
+    const apiKeyNotice = document.getElementById('api-key-notice');
+    
+    if (!apiKey) {
+        console.warn('API金鑰未設置');
+        apiKeyNotice.style.display = 'block';
+    } else {
+        apiKeyNotice.style.display = 'none';
+    }
+}); 
