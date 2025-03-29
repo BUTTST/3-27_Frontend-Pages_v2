@@ -106,15 +106,43 @@ const TranscriptionController = {
             outputText.value = "準備處理您的請求...";
             
             // 1. 獲取輸入數據
-            const link = await this.getInputLink();
+            const input = await this.getInputLink();
             const modelType = document.getElementById('model-select').value;
             const useTimestamps = document.getElementById('timestamp-checkbox').checked;
             
+            // 檢查是否是文件上傳的回應
+            if (input && typeof input === 'object' && input.sync !== undefined) {
+                if (input.sync) {
+                    // 同步處理，直接使用結果
+                    outputText.value = input.result.text;
+                    this.updatePerformanceMetrics(input.result.metrics);
+                    this.currentTranscription = input.result.text;
+                    this.hasTimestamps = useTimestamps;
+                    this.showNotification('轉譯完成！', 'success');
+                    return;
+                } else {
+                    // 異步處理，使用任務ID
+                    outputText.value = "正在處理上傳的音訊檔，請稍候...\n\n任務ID: " + input.id;
+                    const result = await JobPoller.pollJobStatus(input.id, {
+                        onProgress: (data) => {
+                            outputText.value = `正在處理音訊，請稍候...\n\n任務ID: ${input.id}\n輪詢次數: ${data.attempt}/${data.maxAttempts}`;
+                        }
+                    });
+                    outputText.value = result.text;
+                    this.updatePerformanceMetrics(result.metrics);
+                    this.currentTranscription = result.text;
+                    this.hasTimestamps = useTimestamps;
+                    this.showNotification('轉譯完成！', 'success');
+                    return;
+                }
+            }
+            
+            // 如果是連結，正常處理
             outputText.value = "連接API服務...";
             
             // 2. 提交轉譯任務
-            console.log('開始轉譯:', { link, modelType, useTimestamps });
-            const jobResponse = await ApiService.submitTranscriptionJob(link, modelType, useTimestamps);
+            console.log('開始轉譯:', { link: input, modelType, useTimestamps });
+            const jobResponse = await ApiService.submitTranscriptionJob(input, modelType, useTimestamps);
             
             // 3. 輪詢任務結果
             outputText.value = "正在處理音訊，請稍候...\n\n任務ID: " + jobResponse.id;
@@ -128,7 +156,7 @@ const TranscriptionController = {
             });
             
             // 4. 顯示結果
-        outputText.value = result.text;
+            outputText.value = result.text;
             this.updatePerformanceMetrics(result.metrics);
             
             // 保存當前轉譯結果
@@ -137,30 +165,88 @@ const TranscriptionController = {
             
             // 顯示成功通知
             this.showNotification('轉譯完成！', 'success');
-    } catch (error) {
+        } catch (error) {
             console.error('轉譯過程失敗:', error);
             outputText.value = this.formatErrorMessage(error);
             this.showNotification('轉譯失敗', 'error');
-    } finally {
-        loadingOverlay.style.display = 'none';
-    }
+        } finally {
+            loadingOverlay.style.display = 'none';
+        }
     },
     
     // 獲取輸入連結
     async getInputLink() {
         const linkInput = document.getElementById('link-input');
-    const link = linkInput.value.trim();
+        const fileInput = document.getElementById('file-input');
+        const link = linkInput.value.trim();
         
-        if (!link) {
-            throw new Error('請提供影片連結');
+        // 檢查是否有上傳檔案
+        if (fileInput.files && fileInput.files.length > 0) {
+            console.log('偵測到檔案上傳:', fileInput.files[0].name);
+            // 處理檔案上傳
+            return await this.handleFileUpload(fileInput.files[0]);
         }
         
-        // 處理YouTube連結
-        if (link.includes('youtube.com') || link.includes('youtu.be')) {
-            return this.processYoutubeLink(link);
+        // 如果沒有檔案但有連結
+        if (link) {
+            return link;
         }
         
-        return link;
+        // 兩者都沒有
+        throw new Error('請提供影片連結或上傳音訊檔');
+    },
+    
+    // 添加檔案上傳處理方法
+    async handleFileUpload(file) {
+        console.log('處理上傳檔案:', file.name);
+        
+        // 創建FormData
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('model', document.getElementById('model-select').value);
+        formData.append('timestamps', document.getElementById('timestamp-checkbox').checked);
+        
+        try {
+            // 直接發送到後端的檔案上傳端點
+            const response = await fetch(`${API_CONFIG.baseUrl.replace('/run', '')}/api/transcribe/file`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${API_CONFIG.apiKey}`
+                },
+                body: formData
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`上傳檔案失敗 (${response.status}): ${errorText}`);
+            }
+            
+            const data = await response.json();
+            console.log('檔案上傳響應:', data);
+            
+            // 檢查響應
+            if (!data.id) {
+                // 如果沒有返回任務ID，可能是同步響應
+                if (data.transcription) {
+                    return {
+                        sync: true,
+                        result: {
+                            text: data.transcription,
+                            metrics: data.performance || {}
+                        }
+                    };
+                }
+                throw new Error('上傳檔案後未收到有效的返回數據');
+            }
+            
+            return {
+                sync: false,
+                id: data.id
+            };
+        } catch (error) {
+            console.error('檔案上傳失敗:', error);
+            throw error;
+        }
     },
     
     // 處理YouTube連結
@@ -413,8 +499,36 @@ async function pollResult(jobId, retryCount = 0) {
             return pollResult(jobId, retryCount + 1);
         }
     } catch (error) {
-        console.error('輪詢結果錯誤:', error);
-        throw error;
+        console.error(`輪詢第 ${retryCount} 次失敗:`, error);
+        
+        // 特別處理YouTube錯誤
+        if (error.message && (
+            error.message.includes('YouTube') || 
+            error.message.includes('HTTP Error 400') ||
+            error.message.includes('HTTP Error 403') ||
+            error.message.includes('Forbidden') ||
+            error.message.includes('Precondition check failed')
+        )) {
+            console.error('YouTube下載失敗，詳細錯誤:', error);
+            console.log('建議嘗試:');
+            console.log('1. 使用另一個公開的YouTube視頻');
+            console.log('2. 確認視頻不受地區限制或年齡限制');
+            console.log('3. 確認RunPod網絡環境可以訪問YouTube');
+            
+            throw new Error(`無法下載YouTube視頻。可能原因：
+1. 視頻可能被限制或需要登入
+2. 視頻可能在您的地區不可用
+3. YouTube可能檢測到自動下載並阻止了訪問
+4. RunPod的網絡環境可能被YouTube限制
+
+建議嘗試：
+- 使用不同的視頻連結
+- 使用較短的YouTube短片
+- 直接上傳本地音頻文件`);
+        }
+        
+        // 短暫等待後重試
+        await new Promise(resolve => setTimeout(resolve, 5000));
     }
 }
 
@@ -692,24 +806,13 @@ const ApiService = {
             throw new Error('API金鑰未設置，請先設置API金鑰');
         }
         
-        // 處理YouTube鏈接格式
-        let processedLink = link;
-        if (link.includes('youtube.com') || link.includes('youtu.be')) {
-            // 使用invidious等替代服務前綴（如果需要）
-            // processedLink = `https://yewtu.be/watch?v=${this.extractYouTubeID(link)}`;
-            
-            // 或者轉換為短鏈接格式（有時這種格式更容易處理）
-            const videoId = this.extractYouTubeID(link);
-            if (videoId) {
-                processedLink = `https://youtu.be/${videoId}`;
-                console.log('轉換為短鏈接格式:', processedLink);
-            }
-        }
+        // 不對URL進行任何處理，直接使用原始URL
+        // 移除所有URL處理代碼
         
         // 構建請求數據
         const requestData = {
             input: {
-                link: processedLink,
+                link: link,  // 使用原始未處理的連結
                 model: modelType,
                 timestamps: useTimestamps
             }
@@ -837,17 +940,26 @@ const JobPoller = {
                 if (error.message && (
                     error.message.includes('YouTube') || 
                     error.message.includes('HTTP Error 400') ||
+                    error.message.includes('HTTP Error 403') ||
+                    error.message.includes('Forbidden') ||
                     error.message.includes('Precondition check failed')
                 )) {
+                    console.error('YouTube下載失敗，詳細錯誤:', error);
+                    console.log('建議嘗試:');
+                    console.log('1. 使用另一個公開的YouTube視頻');
+                    console.log('2. 確認視頻不受地區限制或年齡限制');
+                    console.log('3. 確認RunPod網絡環境可以訪問YouTube');
+                    
                     throw new Error(`無法下載YouTube視頻。可能原因：
 1. 視頻可能被限制或需要登入
 2. 視頻可能在您的地區不可用
-3. YouTube可能檢測到自動下載
+3. YouTube可能檢測到自動下載並阻止了訪問
+4. RunPod的網絡環境可能被YouTube限制
 
 建議嘗試：
 - 使用不同的視頻連結
 - 使用較短的YouTube短片
-- 如果您有本地音頻文件，嘗試直接上傳`);
+- 直接上傳本地音頻文件`);
                 }
                 
                 // 短暫等待後重試
@@ -959,4 +1071,26 @@ window.addEventListener('error', (event) => {
 // 處理未捕獲的Promise錯誤
 window.addEventListener('unhandledrejection', (event) => {
     console.error('未處理的Promise錯誤:', event.reason);
-}); 
+});
+
+// 添加不同的測試視頻函數
+function addTestVideos() {
+    // 添加測試按鈕到頁面
+    const testPanel = document.createElement('div');
+    testPanel.className = 'test-panel';
+    testPanel.innerHTML = `
+        <h4>測試視頻</h4>
+        <button class="test-btn" data-url="https://www.youtube.com/shorts/JdUjciCnS6g">測試短片 1</button>
+        <button class="test-btn" data-url="https://www.youtube.com/shorts/VXpBBmoHMgs">測試短片 2</button>
+        <button class="test-btn" data-url="https://www.youtube.com/watch?v=dQw4w9WgXcQ">測試普通視頻</button>
+    `;
+    document.body.appendChild(testPanel);
+    
+    // 綁定測試按鈕事件
+    document.querySelectorAll('.test-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.getElementById('link-input').value = btn.getAttribute('data-url');
+            document.getElementById('transcribe-button').click();
+        });
+    });
+} 
