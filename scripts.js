@@ -156,7 +156,7 @@ const TranscriptionController = {
             });
             
             // 4. 顯示結果
-            outputText.value = result.text;
+        outputText.value = result.text;
             this.updatePerformanceMetrics(result.metrics);
             
             // 保存當前轉譯結果
@@ -165,20 +165,20 @@ const TranscriptionController = {
             
             // 顯示成功通知
             this.showNotification('轉譯完成！', 'success');
-        } catch (error) {
+    } catch (error) {
             console.error('轉譯過程失敗:', error);
             outputText.value = this.formatErrorMessage(error);
             this.showNotification('轉譯失敗', 'error');
-        } finally {
-            loadingOverlay.style.display = 'none';
-        }
+    } finally {
+        loadingOverlay.style.display = 'none';
+    }
     },
     
     // 獲取輸入連結
     async getInputLink() {
         const linkInput = document.getElementById('link-input');
         const fileInput = document.getElementById('file-input');
-        const link = linkInput.value.trim();
+    const link = linkInput.value.trim();
         
         // 檢查是否有上傳檔案
         if (fileInput.files && fileInput.files.length > 0) {
